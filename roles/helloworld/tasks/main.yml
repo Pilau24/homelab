@@ -1,11 +1,28 @@
 ---
-- name: Install hello-world Quadlet
-  ansible.builtin.template:
-    src: hello-world.container
-    dest: /etc/containers/systemd/hello-world.container
-    owner: root
-    group: root
-    mode: "0644"
+- name: Remove the superseded hello-world Quadlet
+  ansible.builtin.file:
+    path: /etc/containers/systemd/hello-world.container
+    state: absent
+  notify: Restart hello-world
+
+- name: Configure hello-world and generate its systemd unit
+  containers.podman.podman_container:
+    name: hello-world
+    image: "{{ helloworld.image }}"
+    label: "{{ helloworld.labels }}"
+    state: created
+    generate_systemd:
+      path: /etc/systemd/system
+      new: true
+      names: true
+      no_header: true
+      container_prefix: ""
+      separator: ""
+      restart_policy: always
+      after:
+        - traefik.service
+      requires:
+        - traefik.service
   notify: Restart hello-world
 
 - name: Flush hello-world handlers
@@ -17,9 +34,28 @@
     enabled: true
     state: started
 
+- name: Read hello-world container state
+  containers.podman.podman_container_info:
+    name: hello-world
+  register: hello_world_info
+
 - name: Verify hello-world is running
-  ansible.builtin.command:
-    cmd: podman container inspect --format '{{.State.Status}}' hello-world
-  register: hello_world_status
-  changed_when: false
-  failed_when: hello_world_status.stdout.strip() != 'running'
+  ansible.builtin.assert:
+    that:
+      - hello_world_info.containers | length == 1
+      - hello_world_info.containers[0].State.Running | bool
+    fail_msg: The hello-world container is not running.
+
+- name: Verify Traefik serves hello-world from the control node
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}/"
+    return_content: true
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  register: hello_world_http
+  until: >-
+    hello_world_http.status | default(0) == 200
+    and 'Hello World' in (hello_world_http.content | default(''))
+  retries: 12
+  delay: 5

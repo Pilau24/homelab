@@ -9,14 +9,6 @@
     state: present
     update_cache: true
 
-- name: Create Quadlet directory
-  ansible.builtin.file:
-    path: /etc/containers/systemd
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-
 - name: Enable the Podman API socket
   ansible.builtin.systemd:
     name: podman.socket

@@ -1,11 +1,33 @@
 ---
-- name: Install Traefik Quadlet
-  ansible.builtin.template:
-    src: traefik.container
-    dest: /etc/containers/systemd/traefik.container
-    owner: root
-    group: root
-    mode: "0644"
+- name: Remove the superseded Traefik Quadlet
+  ansible.builtin.file:
+    path: /etc/containers/systemd/traefik.container
+    state: absent
+  notify: Restart Traefik
+
+- name: Configure Traefik and generate its systemd unit
+  containers.podman.podman_container:
+    name: traefik
+    image: "{{ podman_traefik.image }}"
+    command: "{{ podman_traefik.command }}"
+    publish:
+      - "80:80"
+      - "443:443"
+    volume:
+      - /run/podman/podman.sock:/var/run/docker.sock
+    state: created
+    generate_systemd:
+      path: /etc/systemd/system
+      new: true
+      names: true
+      no_header: true
+      container_prefix: ""
+      separator: ""
+      restart_policy: always
+      after:
+        - podman.socket
+      requires:
+        - podman.socket
   notify: Restart Traefik
 
 - name: Flush Traefik handlers

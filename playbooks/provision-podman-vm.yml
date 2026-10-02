@@ -6,6 +6,14 @@
   become: false
   collections:
     - community.proxmox
+  module_defaults:
+    ansible.builtin.uri:
+      headers:
+        Authorization: >-
+          PVEAPIToken={{ homelab_config.proxmox_api_user }}!{{ homelab_config.proxmox_api_token_id }}={{ homelab_config.proxmox_api_token_secret }}
+      validate_certs: "{{ homelab_config.proxmox_validate_certs }}"
+      unredirected_headers:
+        - Authorization
   pre_tasks:
     - name: Decrypt Proxmox configuration on the control node
       ansible.builtin.command:
@@ -84,7 +92,7 @@
           ensure the SSH public key exists.
 
   tasks:
-    - name: Clone and configure the Podman VM
+    - name: Clone the Podman VM without starting it
       community.proxmox.proxmox_kvm:
         api_host: "{{ homelab_config.proxmox_api_host }}"
         api_user: "{{ homelab_config.proxmox_api_user }}"
@@ -98,17 +106,181 @@
         newid: "{{ homelab_config.podman_vm_id }}"
         storage: "{{ homelab_config.proxmox_storage }}"
         full: true
+        timeout: 600
+        state: present
+      no_log: true
+
+    - name: Prepare the target VM API URL and Cloud-Init values
+      ansible.builtin.set_fact:
+        podman_vm_api_url: >-
+          https://{{ homelab_config.proxmox_api_host }}:8006/api2/json/nodes/{{ homelab_config.proxmox_node }}/qemu/{{ homelab_config.podman_vm_id }}
+        podman_vm_ipconfig: "ip={{ homelab_config.podman_vm_cidr }},gw={{ homelab_config.podman_vm_gateway }}"
+        podman_vm_public_key: "{{ lookup('ansible.builtin.file', homelab_config.podman_vm_ssh_public_key_file | default(lookup('ansible.builtin.env', 'HOME') ~ '/.ssh/homelab_ed25519.pub')) | trim }}"
+      no_log: true
+
+    - name: Read the target VM configuration
+      ansible.builtin.uri:
+        url: "{{ podman_vm_api_url }}/config"
+      register: podman_vm_before
+      no_log: true
+
+    - name: Read the target VM power state
+      ansible.builtin.uri:
+        url: "{{ podman_vm_api_url }}/status/current"
+      register: podman_vm_status
+      no_log: true
+
+    - name: Validate the cloned VM network device and Cloud-Init drive
+      ansible.builtin.assert:
+        that:
+          - podman_vm_before.json.data.net0 | default('') is match('virtio=[0-9A-Fa-f:]+,')
+          - "'cloudinit' in (podman_vm_before.json.data.ide2 | default(''))"
+          - podman_vm_before.json.data.lock is not defined
+        fail_msg: >-
+          The VM must have an unlocked Virtio net0 and an ide2 Cloud-Init
+          drive before configuration. Check the template and clone task.
+
+    - name: Preserve the NIC MAC address and other options when setting bridge and VLAN
+      ansible.builtin.set_fact:
+        podman_vm_net0: >-
+          {{ podman_vm_before.json.data.net0
+             | regex_replace(',bridge=[^,]*', '')
+             | regex_replace(',tag=[^,]*', '') }},bridge={{ homelab_config.proxmox_bridge }},tag={{ homelab_config.proxmox_vlan_tag }}
+      no_log: true
+
+    - name: Determine whether the VM configuration needs updating
+      ansible.builtin.set_fact:
+        podman_vm_needs_update: >-
+          {{
+            (podman_vm_before.json.data.cores | default(0) | int != homelab_config.podman_vm_cores | int)
+            or (podman_vm_before.json.data.memory | default(0) | int != homelab_config.podman_vm_memory | int)
+            or ('bridge=' ~ homelab_config.proxmox_bridge not in podman_vm_before.json.data.net0.split(','))
+            or ('tag=' ~ (homelab_config.proxmox_vlan_tag | string) not in podman_vm_before.json.data.net0.split(','))
+            or (podman_vm_before.json.data.agent | default('0') | string not in ['1', 'enabled=1'])
+            or (podman_vm_before.json.data.ciuser | default('') != 'ansible')
+            or (podman_vm_before.json.data.ipconfig0 | default('') != podman_vm_ipconfig)
+            or (homelab_config.podman_vm_nameserver | length > 0
+                and podman_vm_before.json.data.nameserver | default('') != homelab_config.podman_vm_nameserver)
+            or (podman_vm_before.json.data.sshkeys | default('') | trim != podman_vm_public_key
+                and podman_vm_before.json.data.sshkeys | default('') | urldecode | trim != podman_vm_public_key)
+          }}
+      no_log: true
+
+    - name: Require a stopped VM before changing boot-time configuration
+      ansible.builtin.assert:
+        that:
+          - not podman_vm_needs_update or podman_vm_status.json.data.status == 'stopped'
+        fail_msg: >-
+          Cloud-Init or hardware changes are required. Stop the Podman VM
+          before rerunning provisioning; it will not be restarted automatically
+          while configuration is incomplete.
+
+    - name: Apply Podman VM Cloud-Init and network configuration
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ homelab_config.proxmox_api_host }}"
+        api_user: "{{ homelab_config.proxmox_api_user }}"
+        api_token_id: "{{ homelab_config.proxmox_api_token_id }}"
+        api_token_secret: "{{ homelab_config.proxmox_api_token_secret }}"
+        validate_certs: "{{ homelab_config.proxmox_validate_certs }}"
+        node: "{{ homelab_config.proxmox_node }}"
+        vmid: "{{ homelab_config.podman_vm_id }}"
+        update: true
+        update_unsafe: true
         cores: "{{ homelab_config.podman_vm_cores }}"
         memory: "{{ homelab_config.podman_vm_memory }}"
         net:
-          net0: "virtio,bridge={{ homelab_config.proxmox_bridge }},tag={{ homelab_config.proxmox_vlan_tag }}"
+          net0: "{{ podman_vm_net0 }}"
         agent: "1"
         ciuser: ansible
-        sshkeys: "{{ lookup('ansible.builtin.file', homelab_config.podman_vm_ssh_public_key_file | default(lookup('ansible.builtin.env', 'HOME') ~ '/.ssh/homelab_ed25519.pub')) }}"
+        sshkeys: "{{ podman_vm_public_key }}"
         ipconfig:
-          ipconfig0: "ip={{ homelab_config.podman_vm_cidr }},gw={{ homelab_config.podman_vm_gateway }}"
+          ipconfig0: "{{ podman_vm_ipconfig }}"
         nameservers: "{{ [homelab_config.podman_vm_nameserver] if homelab_config.podman_vm_nameserver | length > 0 else omit }}"
         state: present
+      when: podman_vm_needs_update
+      no_log: true
+
+    - name: Read back the applied VM configuration
+      ansible.builtin.uri:
+        url: "{{ podman_vm_api_url }}/config"
+      register: podman_vm_after
+      no_log: true
+
+    - name: Verify Cloud-Init and network settings before boot
+      ansible.builtin.assert:
+        that:
+          - podman_vm_after.json.data.cores | int == homelab_config.podman_vm_cores | int
+          - podman_vm_after.json.data.memory | int == homelab_config.podman_vm_memory | int
+          - podman_vm_after.json.data.ipconfig0 | default('') == podman_vm_ipconfig
+          - podman_vm_after.json.data.ciuser | default('') == 'ansible'
+          - >-
+            podman_vm_after.json.data.sshkeys | default('') | trim == podman_vm_public_key
+            or podman_vm_after.json.data.sshkeys | default('') | urldecode | trim == podman_vm_public_key
+          - "'bridge=' ~ homelab_config.proxmox_bridge in podman_vm_after.json.data.net0.split(',')"
+          - "'tag=' ~ (homelab_config.proxmox_vlan_tag | string) in podman_vm_after.json.data.net0.split(',')"
+          - podman_vm_after.json.data.net0.split(',')[0] == podman_vm_before.json.data.net0.split(',')[0]
+          - homelab_config.podman_vm_nameserver | length == 0 or podman_vm_after.json.data.nameserver | default('') == homelab_config.podman_vm_nameserver
+        fail_msg: >-
+          Proxmox did not retain the required Cloud-Init or NIC settings.
+          Startup is blocked; inspect the VM configuration and API permissions.
+      no_log: true
+
+    - name: Regenerate the Cloud-Init drive while the VM is stopped
+      ansible.builtin.uri:
+        url: "{{ podman_vm_api_url }}/cloudinit"
+        method: PUT
+      when: podman_vm_status.json.data.status == 'stopped'
+      changed_when: podman_vm_needs_update
+      no_log: true
+
+    - name: Read the generated Cloud-Init network data
+      ansible.builtin.uri:
+        url: "{{ podman_vm_api_url }}/cloudinit/dump?type=network"
+      register: podman_vm_cloudinit_network
+      no_log: true
+
+    - name: Select the generated Cloud-Init interface by its MAC address
+      ansible.builtin.set_fact:
+        podman_vm_cloudinit_nics: >-
+          {{
+            (podman_vm_cloudinit_network.json.data | from_yaml).config
+            | selectattr('type', 'equalto', 'physical')
+            | selectattr('mac_address', 'defined')
+            | selectattr('mac_address', 'equalto',
+                podman_vm_after.json.data.net0.split(',')[0].split('=')[1] | lower)
+            | list
+          }}
+      no_log: true
+
+    - name: Verify the generated Cloud-Init interface, static IP, and gateway
+      ansible.builtin.assert:
+        that:
+          - podman_vm_cloudinit_nics | length == 1
+          - >-
+            podman_vm_cloudinit_nics[0].subnets
+            | selectattr('type', 'equalto', 'static')
+            | selectattr('address', 'equalto', homelab_config.podman_vm_cidr.split('/')[0])
+            | selectattr('gateway', 'equalto', homelab_config.podman_vm_gateway)
+            | list | length == 1
+        fail_msg: >-
+          Generated Cloud-Init network data does not match the VM's NIC,
+          static IP, or gateway. Startup is blocked.
+      no_log: true
+
+    - name: Read the generated Cloud-Init user data
+      ansible.builtin.uri:
+        url: "{{ podman_vm_api_url }}/cloudinit/dump?type=user"
+      register: podman_vm_cloudinit_user
+      no_log: true
+
+    - name: Verify the generated Cloud-Init login user and SSH key
+      ansible.builtin.assert:
+        that:
+          - (podman_vm_cloudinit_user.json.data | from_yaml).user | default('') == 'ansible'
+          - podman_vm_public_key in ((podman_vm_cloudinit_user.json.data | from_yaml).ssh_authorized_keys | default([]))
+        fail_msg: >-
+          Generated Cloud-Init user data does not contain the expected
+          ansible user and SSH key. Startup is blocked.
       no_log: true
 
     - name: Start the Podman VM
@@ -121,6 +293,8 @@
         node: "{{ homelab_config.proxmox_node }}"
         vmid: "{{ homelab_config.podman_vm_id }}"
         state: started
+        timeout: 600
+      when: podman_vm_start | default(true) | bool
       no_log: true
 
     - name: Wait for the Podman VM SSH service
@@ -131,3 +305,4 @@
         delay: 10
         timeout: 600
         state: started
+      when: podman_vm_start | default(true) | bool
