@@ -59,6 +59,14 @@ Proxmox credentials.
 Replace VM IDs, paths, hostnames, and application names when the environment
 uses different values.
 
+The Ansible control VM also requires the Proxmox Python client:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-proxmoxer
+ansible-galaxy collection install -r requirements.yml
+```
+
 ## 1. Establish a safe starting point
 
 Run on the control VM:

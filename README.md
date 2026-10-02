@@ -61,8 +61,13 @@ copy the private key into the repository.
 ## Install collections
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y python3-proxmoxer
 ansible-galaxy collection install -r requirements.yml
 ```
+
+`python3-proxmoxer` is required by the `community.proxmox` collection on the
+control VM.
 
 ## Provision and configure
 
@@ -115,4 +120,6 @@ Run syntax checks before applying changes:
 ```bash
 ansible-playbook --syntax-check playbooks/provision-podman-vm.yml
 ansible-playbook --syntax-check playbooks/configure-podman.yml
+ansible-playbook --syntax-check playbooks/configure-traefik.yml
+ansible-playbook --syntax-check playbooks/configure-helloworld.yml
 ```

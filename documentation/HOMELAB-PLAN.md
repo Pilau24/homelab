@@ -99,6 +99,21 @@ The controller will connect to the Proxmox API using:
 The API credentials and site configuration are decrypted from SOPS files on
 the control VM rather than embedded in playbooks.
 
+The control VM also requires the Debian `python3-proxmoxer` package for the
+`community.proxmox` collection:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-proxmoxer
+```
+
+The API token must be able to audit and clone template VM `9000`, allocate
+space on `local-lvm`, configure and start the target VM, and access node
+`pve`. At minimum, review `VM.Audit`, `VM.Clone`, `VM.Config.CPU`,
+`VM.Config.Disk`, `VM.Config.Memory`, `VM.Config.Network`,
+`VM.Config.Options`, `VM.PowerMgmt`, `Datastore.AllocateSpace`, and
+`Sys.Audit` for the token's ACL scope.
+
 ## 5. VM definition
 
 Define each VM as data so additional application VMs can be added without

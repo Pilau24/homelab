@@ -92,7 +92,7 @@
         api_token_secret: "{{ homelab_config.proxmox_api_token_secret }}"
         validate_certs: "{{ homelab_config.proxmox_validate_certs }}"
         node: "{{ homelab_config.proxmox_node }}"
-        vmid: "{{ homelab_config.podman_vm_id }}"
+        vmid: "{{ homelab_config.proxmox_template_vmid }}"
         clone: "{{ homelab_config.proxmox_template_vmid }}"
         name: "{{ homelab_config.podman_vm_name }}"
         newid: "{{ homelab_config.podman_vm_id }}"
