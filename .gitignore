@@ -5,6 +5,23 @@ secrets/**/*.plain.yml
 .env
 .env.*
 *.key
+*.pem
+*.p12
+*.pfx
+*.retry
+*.log
+*.decrypted.yml
+*.decrypted.yaml
+*.plain.yaml
+*.secret
+vault-password-file
+
+# Locally installed Ansible content and Python artifacts
+collections/
+.ansible/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
 # Local SOPS and key-management files
 .sops/
