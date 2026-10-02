@@ -1,12 +1,12 @@
 creation_rules:
   - path_regex: secrets/proxmox/.*\.ya?ml$
-    age: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVkycfAgl4lqaLLqkClUVlaX/ZiSZ+0l0i6rFtuZx/J sops-control-key
+    age: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKFyGuei5gt+jbejZvCrpX0XXD1854N7BkkmEQDRh28/ sops-control-key
 
   - path_regex: secrets/hosts/podman\.ya?ml$
-    age: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVkycfAgl4lqaLLqkClUVlaX/ZiSZ+0l0i6rFtuZx/J sops-control-key
+    age: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKFyGuei5gt+jbejZvCrpX0XXD1854N7BkkmEQDRh28/ sops-control-key
 
   - path_regex: secrets/podman/.*\.ya?ml$
-    age: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVkycfAgl4lqaLLqkClUVlaX/ZiSZ+0l0i6rFtuZx/J sops-control-key
+    age: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKFyGuei5gt+jbejZvCrpX0XXD1854N7BkkmEQDRh28/ sops-control-key
 
   - path_regex: secrets/containers/.*\.ya?ml$
-    age: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEVkycfAgl4lqaLLqkClUVlaX/ZiSZ+0l0i6rFtuZx/J sops-control-key
+    age: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKFyGuei5gt+jbejZvCrpX0XXD1854N7BkkmEQDRh28/ sops-control-key
