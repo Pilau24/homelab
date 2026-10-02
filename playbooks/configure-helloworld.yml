@@ -1,0 +1,9 @@
+---
+- ansible.builtin.import_playbook: bootstrap-podman-host.yml
+
+- name: Configure hello-world
+  hosts: podman_hosts
+  become: true
+  gather_facts: false
+  roles:
+    - role: helloworld

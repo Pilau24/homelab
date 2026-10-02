@@ -1,0 +1,7 @@
+---
+- name: Restart hello-world
+  ansible.builtin.systemd:
+    daemon_reload: true
+    name: hello-world.service
+    enabled: true
+    state: restarted

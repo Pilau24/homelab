@@ -1,0 +1,17 @@
+[Unit]
+Description=Hello World application
+After=traefik.service
+Requires=traefik.service
+
+[Container]
+Image={{ helloworld.image }}
+ContainerName=hello-world
+{% for key, value in helloworld.labels.items() %}
+Label={{ key }}={{ value }}
+{% endfor %}
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

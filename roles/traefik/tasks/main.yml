@@ -1,0 +1,18 @@
+---
+- name: Install Traefik Quadlet
+  ansible.builtin.template:
+    src: traefik.container
+    dest: /etc/containers/systemd/traefik.container
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Traefik
+
+- name: Flush Traefik handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Start Traefik
+  ansible.builtin.systemd:
+    name: traefik.service
+    enabled: true
+    state: started

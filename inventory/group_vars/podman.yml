@@ -1,0 +1,18 @@
+---
+podman_traefik:
+  image: docker.io/library/traefik:v3.3
+  command:
+    - "--providers.docker=true"
+    - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+    - "--providers.docker.exposedbydefault=false"
+    - "--entrypoints.web.address=:80"
+    - "--entrypoints.websecure.address=:443"
+    - "--api.dashboard=false"
+
+helloworld:
+  image: docker.io/crccheck/hello-world:latest
+  labels:
+    traefik.enable: "true"
+    traefik.http.routers.hello.rule: "PathPrefix(`/`)"
+    traefik.http.routers.hello.entrypoints: "web"
+    traefik.http.services.hello.loadbalancer.server.port: "8000"

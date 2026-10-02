@@ -1,0 +1,31 @@
+---
+- name: Load encrypted Podman host configuration
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Decrypt Podman configuration on the control node
+      ansible.builtin.command:
+        argv:
+          - sops
+          - --decrypt
+          - "{{ playbook_dir }}/../secrets/podman/config.yml"
+      environment:
+        SOPS_AGE_SSH_PRIVATE_KEY_FILE: >-
+          {{ lookup(
+               'ansible.builtin.env',
+               'SOPS_AGE_SSH_PRIVATE_KEY_FILE',
+               default=lookup('ansible.builtin.env', 'HOME') ~
+                 '/.config/sops/ssh/sops_ed25519'
+             ) }}
+      register: podman_config_raw
+      changed_when: false
+      no_log: true
+
+    - name: Add the configured Podman VM to the runtime inventory
+      ansible.builtin.add_host:
+        name: podman
+        groups: podman_hosts
+        ansible_host: "{{ (podman_config_raw.stdout | from_yaml).podman_vm_address }}"
+        ansible_user: ansible
+        ansible_ssh_private_key_file: "{{ lookup('ansible.builtin.env', 'HOMELAB_SSH_KEY', default=lookup('ansible.builtin.env', 'HOME') ~ '/.ssh/homelab_ed25519') }}"

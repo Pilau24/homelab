@@ -1,0 +1,25 @@
+---
+- name: Install hello-world Quadlet
+  ansible.builtin.template:
+    src: hello-world.container
+    dest: /etc/containers/systemd/hello-world.container
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart hello-world
+
+- name: Flush hello-world handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Start hello-world
+  ansible.builtin.systemd:
+    name: hello-world.service
+    enabled: true
+    state: started
+
+- name: Verify hello-world is running
+  ansible.builtin.command:
+    cmd: podman container inspect --format '{{.State.Status}}' hello-world
+  register: hello_world_status
+  changed_when: false
+  failed_when: hello_world_status.stdout.strip() != 'running'

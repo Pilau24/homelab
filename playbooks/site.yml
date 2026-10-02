@@ -1,0 +1,5 @@
+---
+- ansible.builtin.import_playbook: provision-podman-vm.yml
+- ansible.builtin.import_playbook: configure-podman.yml
+- ansible.builtin.import_playbook: configure-traefik.yml
+- ansible.builtin.import_playbook: configure-helloworld.yml

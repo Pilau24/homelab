@@ -1,0 +1,3 @@
+---
+ansible_python_interpreter: /usr/bin/python3
+homelab_repo_root: "{{ inventory_dir | dirname }}"

@@ -1,0 +1,133 @@
+---
+- name: Provision homelab VMs from the Debian Cloud-Init template
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  collections:
+    - community.proxmox
+  pre_tasks:
+    - name: Decrypt Proxmox configuration on the control node
+      ansible.builtin.command:
+        argv:
+          - sops
+          - --decrypt
+          - "{{ playbook_dir }}/../secrets/proxmox/config.yml"
+      environment:
+        SOPS_AGE_SSH_PRIVATE_KEY_FILE: >-
+          {{ lookup(
+               'ansible.builtin.env',
+               'SOPS_AGE_SSH_PRIVATE_KEY_FILE',
+               default=lookup('ansible.builtin.env', 'HOME') ~
+                 '/.config/sops/ssh/sops_ed25519'
+             ) }}
+      register: proxmox_config_raw
+      changed_when: false
+      no_log: true
+
+    - name: Decrypt Podman configuration on the control node
+      ansible.builtin.command:
+        argv:
+          - sops
+          - --decrypt
+          - "{{ playbook_dir }}/../secrets/podman/config.yml"
+      environment:
+        SOPS_AGE_SSH_PRIVATE_KEY_FILE: >-
+          {{ lookup(
+               'ansible.builtin.env',
+               'SOPS_AGE_SSH_PRIVATE_KEY_FILE',
+               default=lookup('ansible.builtin.env', 'HOME') ~
+                 '/.config/sops/ssh/sops_ed25519'
+             ) }}
+      register: podman_config_raw
+      changed_when: false
+      no_log: true
+
+    - name: Decrypt Proxmox credentials on the control node
+      ansible.builtin.command:
+        argv:
+          - sops
+          - --decrypt
+          - "{{ playbook_dir }}/../secrets/proxmox/api.yml"
+      environment:
+        SOPS_AGE_SSH_PRIVATE_KEY_FILE: >-
+          {{ lookup(
+               'ansible.builtin.env',
+               'SOPS_AGE_SSH_PRIVATE_KEY_FILE',
+               default=lookup('ansible.builtin.env', 'HOME') ~
+                 '/.config/sops/ssh/sops_ed25519'
+             ) }}
+      register: proxmox_secrets_raw
+      changed_when: false
+      no_log: true
+
+    - name: Parse encrypted deployment configuration
+      ansible.builtin.set_fact:
+        homelab_config: >-
+          {{
+            (proxmox_config_raw.stdout | from_yaml)
+            | combine(podman_config_raw.stdout | from_yaml)
+            | combine(proxmox_secrets_raw.stdout | from_yaml)
+          }}
+      no_log: true
+
+    - name: Validate deployment configuration
+      ansible.builtin.assert:
+        that:
+          - homelab_config.proxmox_api_host | length > 0
+          - homelab_config.proxmox_node | length > 0
+          - homelab_config.podman_vm_cidr | length > 0
+          - homelab_config.podman_vm_gateway | length > 0
+          - lookup('ansible.builtin.file', homelab_config.podman_vm_ssh_public_key_file | default(lookup('ansible.builtin.env', 'HOME') ~ '/.ssh/homelab_ed25519.pub'), errors='ignore') | length > 0
+        fail_msg: >-
+          Check the encrypted Proxmox and Podman configuration files and
+          ensure the SSH public key exists.
+
+  tasks:
+    - name: Clone and configure the Podman VM
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ homelab_config.proxmox_api_host }}"
+        api_user: "{{ homelab_config.proxmox_api_user }}"
+        api_token_id: "{{ homelab_config.proxmox_api_token_id }}"
+        api_token_secret: "{{ homelab_config.proxmox_api_token_secret }}"
+        validate_certs: "{{ homelab_config.proxmox_validate_certs }}"
+        node: "{{ homelab_config.proxmox_node }}"
+        vmid: "{{ homelab_config.podman_vm_id }}"
+        clone: "{{ homelab_config.proxmox_template_vmid }}"
+        name: "{{ homelab_config.podman_vm_name }}"
+        newid: "{{ homelab_config.podman_vm_id }}"
+        storage: "{{ homelab_config.proxmox_storage }}"
+        full: true
+        cores: "{{ homelab_config.podman_vm_cores }}"
+        memory: "{{ homelab_config.podman_vm_memory }}"
+        net:
+          net0: "virtio,bridge={{ homelab_config.proxmox_bridge }},tag={{ homelab_config.proxmox_vlan_tag }}"
+        agent: "1"
+        ciuser: ansible
+        sshkeys: "{{ lookup('ansible.builtin.file', homelab_config.podman_vm_ssh_public_key_file | default(lookup('ansible.builtin.env', 'HOME') ~ '/.ssh/homelab_ed25519.pub')) }}"
+        ipconfig:
+          ipconfig0: "ip={{ homelab_config.podman_vm_cidr }},gw={{ homelab_config.podman_vm_gateway }}"
+        nameservers: "{{ [homelab_config.podman_vm_nameserver] if homelab_config.podman_vm_nameserver | length > 0 else omit }}"
+        state: present
+      no_log: true
+
+    - name: Start the Podman VM
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ homelab_config.proxmox_api_host }}"
+        api_user: "{{ homelab_config.proxmox_api_user }}"
+        api_token_id: "{{ homelab_config.proxmox_api_token_id }}"
+        api_token_secret: "{{ homelab_config.proxmox_api_token_secret }}"
+        validate_certs: "{{ homelab_config.proxmox_validate_certs }}"
+        node: "{{ homelab_config.proxmox_node }}"
+        vmid: "{{ homelab_config.podman_vm_id }}"
+        state: started
+      no_log: true
+
+    - name: Wait for the Podman VM SSH service
+      ansible.builtin.wait_for:
+        host: "{{ homelab_config.podman_vm_address }}"
+        port: 22
+        connect_timeout: 5
+        delay: 10
+        timeout: 600
+        state: started
