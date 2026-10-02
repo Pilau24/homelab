@@ -19,9 +19,13 @@ Completed and verified during the initial setup:
 - `.sops.yaml` created with the dedicated SSH public recipient.
 - SOPS encryption and decryption tested successfully with a harmless value.
 - Proxmox, Podman, and Traefik encrypted files are present.
+- Controller-side SOPS decryption and the complete homelab deployment passed.
+- The guest has `10.10.70.4/24`; Traefik returns HTTP 200 with `Hello World`.
+- The current dedicated SOPS key is passphrase-free for unattended operation.
 
 Remaining operational work includes validating least privilege, logging,
-rotation, and recovery.
+rotation, and recovery. Traefik currently uses HTTP only; container-secret
+delivery is deferred until an application requires a secret.
 
 ## Architecture
 
@@ -170,6 +174,7 @@ Create a new Ed25519 key used only for SOPS:
 ```bash
 install -d -m 700 ~/.config/sops/ssh
 ssh-keygen -t ed25519 \
+  -N '' \
   -f ~/.config/sops/ssh/sops_ed25519 \
   -C "sops-control-key"
 chmod 600 ~/.config/sops/ssh/sops_ed25519
@@ -177,17 +182,20 @@ chmod 644 ~/.config/sops/ssh/sops_ed25519.pub
 cat ~/.config/sops/ssh/sops_ed25519.pub
 ```
 
-Use a unique strong passphrase. Record only the public key. Configure SOPS
-to find the private key on the control VM:
+The current unattended setup uses an empty passphrase (`-N ''`), with the
+private key restricted to the control VM and mode `0600`. Protect the
+controller and keep encrypted backups. Do not overwrite an existing key:
+changing the key requires re-encrypting every affected SOPS file.
+
+Record only the public key. The playbooks automatically use this private-key
+path. For manual SOPS commands, configure it in the current shell:
 
 ```bash
 export SOPS_AGE_SSH_PRIVATE_KEY_FILE="$HOME/.config/sops/ssh/sops_ed25519"
 ```
 
-Persist this variable only in a protected control-VM environment file if the
-Ansible workflow requires it. Never commit that file. The private-key path
-method is preferred over `SOPS_AGE_SSH_PRIVATE_KEY_CMD` because command
-output must not expose a passphrase-protected key.
+Set this variable to override the default key path when needed. No key-loader
+script or SSH agent is required for the current passphrase-free key.
 
 Before using it in production, complete the test in section 6. Keep the
 key backup until SSH-backed recovery is proven. This implementation uses
@@ -199,11 +207,11 @@ fallback.
 Back up the dedicated private key before creating production secrets:
 
 - `~/.config/sops/ssh/sops_ed25519`
-- The unique passphrase protecting that key
+- Its passphrase, if using a passphrase-protected key instead
 
 Use at least two encrypted backups on separate media or encrypted storage.
 Keep one backup offline and separate from the Git repository. Protect the
-private key and its passphrase independently. Do not store either in Git,
+private key and any passphrase independently. Do not store either in Git,
 chat, an issue, an unencrypted email, or the Podman guest.
 
 Test restoration later in a separate environment. Do not print the key while
@@ -298,6 +306,10 @@ proxmox_api_token_id: REPLACE_LOCALLY
 proxmox_api_token_secret: REPLACE_LOCALLY
 ```
 
+`proxmox_api_user` is the owner and realm (for example `ansible@pam`).
+`proxmox_api_token_id` is only the token name (`homelab-ansible`), not the
+full ACL identity `ansible@pam!homelab-ansible`.
+
 Encrypt it:
 
 ```bash
@@ -327,7 +339,7 @@ podman_vm_address: REPLACE_LOCALLY
 podman_vm_cidr: REPLACE_LOCALLY
 podman_vm_gateway: REPLACE_LOCALLY
 podman_vm_nameserver: REPLACE_LOCALLY
-podman_vm_cores: 4
+podman_vm_cores: 2
 podman_vm_memory: 4096
 ```
 
@@ -344,6 +356,19 @@ sops --decrypt --extract '["proxmox_api_user"]' secrets/proxmox/api.yml >/dev/nu
 Every secret file must be encrypted before it is staged. Split files by
 trust boundary; never place Proxmox credentials in a guest or application
 file.
+
+Use `sops secrets/proxmox/api.yml` to edit credentials without leaving the
+tracked file decrypted. If decrypting in place for an editor, re-encrypt it
+before staging:
+
+```bash
+sops encrypt --in-place secrets/proxmox/api.yml
+sops filestatus secrets/proxmox/api.yml
+sops decrypt --output /dev/null secrets/proxmox/api.yml
+```
+
+The status must report `"encrypted":true`. `.gitignore` cannot prevent
+staging plaintext changes to a file that Git already tracks.
 
 ## 8. Wire Ansible to decrypt on the control VM
 
@@ -371,7 +396,15 @@ ansible-playbook --syntax-check playbooks/configure-helloworld.yml
 ```
 
 Use check mode or a targeted deployment before applying changes where the
-playbooks support it. Review output for accidental secret exposure.
+playbooks support it. Provisioning depends on live API read-back, so check
+mode is not a supported end-to-end validation. To apply and verify settings
+on a stopped VM without booting it, use:
+
+```bash
+ansible-playbook playbooks/provision-podman-vm.yml -e podman_vm_start=false
+```
+
+Review output for accidental secret exposure.
 
 ## 9. Deliver secrets to Podman
 
@@ -457,10 +490,10 @@ recipients, and test outcomes:
 | Step | Date | Result |
 |------|------|--------|
 | Tools installed | 2026-10-02 | age and sops installed |
-| Dedicated SSH key generated | | |
+| Dedicated SSH key generated | 2026-10-02 | Separate passphrase-free SOPS key; private key stays outside Git |
 | SSH key backup tested | | |
 | SOPS test passed | 2026-10-02 | Passed; VS Code prompt warnings were unrelated to SOPS |
-| Encrypted files created | | |
-| Ansible deployment tested | | |
-| Podman secret delivery tested | | |
+| Encrypted files created | 2026-10-02 | Four SOPS-encrypted YAML files |
+| Ansible deployment tested | 2026-10-02 | Passed; Cloud-Init verified before boot, HTTP 200, repeat run without persistent changes |
+| Podman secret delivery tested | | Deferred; initial containers require no application secrets |
 | Recovery tested | | |

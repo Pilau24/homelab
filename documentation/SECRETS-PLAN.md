@@ -1,28 +1,34 @@
 # Remaining secrets work
 
-The initial SOPS setup and real Proxmox and Traefik encrypted files are
-complete. The remaining work is to connect encrypted values to Ansible and
-Podman, then test operations and recovery.
+Controller-side SOPS decryption, encrypted Proxmox/Podman configuration,
+and the complete homelab deployment are implemented and tested. Remaining
+work is to validate least privilege, deliver application secrets when needed,
+and test rotation and recovery.
 
 ## 1. Wire SOPS into Ansible
 
-- [ ] Identify the repository's inventory, playbooks, and roles that need
+- [x] Identify the repository's inventory, playbooks, and roles that need
   Proxmox or application credentials.
-- [ ] Configure the control VM to load the dedicated SOPS SSH private key
+- [x] Configure the control VM to load the dedicated SOPS SSH private key
   through `SOPS_AGE_SSH_PRIVATE_KEY_FILE`.
-- [ ] Use the repository-supported SOPS/Ansible lookup or decryption method.
+- [x] Use the repository-supported SOPS/Ansible lookup or decryption method.
 - [ ] Load only the fields required by each task.
 - [ ] Add `no_log: true` to every task that reads, transforms, transfers, or
   creates a secret.
-- [ ] Do not pass secret values as command-line arguments, labels, or debug
+- [x] Do not pass secret values as command-line arguments, labels, or debug
   output.
-- [ ] Disable persistent fact caching for decrypted values.
-- [ ] Run playbook syntax checks and a safe targeted check-mode run.
+- [x] Disable persistent fact caching for decrypted values.
+- [x] Run playbook syntax checks and a targeted deployment.
 
-The private SSH key remains only on the control VM. It must not be copied to
-the Podman guest.
+The dedicated SOPS private key remains only on the control VM. It is
+separate from the controller-to-guest SSH key. The current SOPS key has no
+passphrase for unattended operation; it requires no SSH agent. Neither
+private key is copied to the Podman guest.
 
 ## 2. Deliver Podman secrets
+
+Deferred: the initial HTTP-only Traefik and hello-world containers need no
+application secrets. The encrypted Traefik file is reserved for future use.
 
 - [ ] Pass only the required application value from Ansible to the Podman VM.
 - [ ] Create an idempotent named Podman secret.
@@ -42,7 +48,7 @@ or Proxmox API credentials.
 - [ ] Confirm each container can access only its intended secret.
 - [ ] Confirm Ansible output does not reveal secret values.
 - [ ] Confirm `git diff --cached` contains encrypted values only.
-- [ ] Confirm the application works after deployment.
+- [x] Confirm the application works after deployment.
 - [ ] Confirm a container restart preserves the intended secret behavior.
 
 ## 4. Test rotation
@@ -63,7 +69,7 @@ exposed key.
 ## 5. Test recovery
 
 - [ ] Maintain at least two independent encrypted backups of the dedicated
-  SOPS SSH private key and its passphrase.
+  SOPS SSH private key and any passphrase, if one is used.
 - [ ] Clone the repository in a separate test environment.
 - [ ] Restore the private-key backup without committing or displaying it.
 - [ ] Configure `SOPS_AGE_SSH_PRIVATE_KEY_FILE`.

@@ -56,7 +56,7 @@ Create the Ansible project with this structure:
 │   ├── hosts.yml
 │   └── group_vars/
 │       ├── all.yml
-│       └── podman.yml
+│       └── podman_hosts.yml
 ├── playbooks/
 │   ├── site.yml
 │   ├── provision-podman-vm.yml
@@ -109,10 +109,75 @@ sudo apt-get install -y python3-proxmoxer
 
 The API token must be able to audit and clone template VM `9000`, allocate
 space on `local-lvm`, configure and start the target VM, and access node
-`pve`. At minimum, review `VM.Audit`, `VM.Clone`, `VM.Config.CPU`,
+`pve`. At minimum, review `VM.Audit`, `VM.Clone`, `VM.Allocate`,
+`VM.Config.CPU`, `VM.Config.Cloudinit`,
 `VM.Config.Disk`, `VM.Config.Memory`, `VM.Config.Network`,
 `VM.Config.Options`, `VM.PowerMgmt`, `Datastore.AllocateSpace`, and
 `Sys.Audit` for the token's ACL scope.
+
+### Token identity and ACL setup
+
+Proxmox ACLs use the complete token identity, not only the token name:
+
+```text
+USER@REALM!TOKEN_NAME
+```
+
+For the configured token name, `homelab-ansible`, the identity is
+`ansible@pam!homelab-ansible` when its owner is `ansible@pam`. Confirm the
+owner and realm before applying ACLs:
+
+```bash
+pveum user token list ansible@pam
+pveum user list
+```
+
+Create these custom roles once on the Proxmox node:
+
+```bash
+pveum role add HomelabTemplateClone \
+  --privs "VM.Audit VM.Clone"
+
+pveum role add HomelabVMProvisioner \
+  --privs "VM.Audit VM.Allocate VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.Memory VM.Config.Network VM.Config.Options VM.PowerMgmt Sys.Audit"
+
+pveum role add HomelabStorage \
+  --privs "Datastore.AllocateSpace"
+```
+
+Assign them to the token owner:
+
+```bash
+pveum acl modify /vms/9000 \
+  --tokens 'ansible@pam!homelab-ansible' \
+  --roles HomelabTemplateClone
+
+pveum acl modify / \
+  --tokens 'ansible@pam!homelab-ansible' \
+  --roles HomelabVMProvisioner
+
+pveum acl modify /storage/local-lvm \
+  --tokens 'ansible@pam!homelab-ansible' \
+  --roles HomelabStorage
+```
+
+Replace `ansible@pam` in every command if the token belongs to another user
+or authentication realm. With token privilege separation enabled, the owner
+must have the same or broader ACLs on the same paths; effective access is the
+intersection of user and token permissions. See the owner ACL commands in
+the [README](../README.md#proxmox-api-token-permissions). The `/` provisioning
+grant covers all VM IDs, so review its scope before reusing it elsewhere.
+Review the resulting permissions with:
+
+```bash
+pveum acl list
+pveum user token permissions ansible@pam homelab-ansible
+```
+
+Do not include the token secret in commands, documentation, or Git. If the
+clone task returns `403 Forbidden: Permission check failed` while template
+audit succeeds, check the full token identity and the `VM.Clone` and
+`VM.Allocate` assignments first.
 
 ## 5. VM definition
 
@@ -141,7 +206,7 @@ podman:
   vmid: 101
   name: podman
   template_vmid: 9000
-  cores: 4
+  cores: 2
   memory_mb: 4096
   ip: 10.10.70.4/24
   gateway: 10.10.70.1
@@ -151,6 +216,9 @@ podman:
 The VM ID and network values above are examples and must be replaced with the
 actual values for the environment.
 
+The current Proxmox node permits at most two vCPUs per VM, so the encrypted
+Podman VM configuration uses two cores.
+
 ## 6. VM provisioning workflow
 
 The `provision-podman-vm.yml` playbook will:
@@ -158,11 +226,13 @@ The `provision-podman-vm.yml` playbook will:
 1. Validate required variables before making changes.
 2. Confirm template `9000` exists on the selected Proxmox node.
 3. Clone template `9000` as a full clone using `local-lvm`.
-4. Apply CPU, memory, disk, network, and Cloud-Init settings.
+4. Explicitly update CPU, memory, network, and Cloud-Init settings using
+   `update: true`; clone parameters alone do not configure the target VM.
 5. Configure the `ansible` user and SSH public key.
 6. Configure static networking through Proxmox Cloud-Init settings.
-7. Regenerate the Cloud-Init drive.
-8. Start the VM when its desired state is `started`.
+7. Read back and verify the settings, regenerate the Cloud-Init drive while
+   stopped, and verify its generated NIC, IP, gateway, user, and SSH key.
+8. Start the VM only after verification, unless `podman_vm_start=false`.
 9. Wait for SSH to become available.
 10. Verify the VM is reachable using Ansible.
 
@@ -170,6 +240,12 @@ Provisioning must be idempotent: rerunning the playbook should update an
 existing VM where safe and must not accidentally recreate or destroy it.
 Destructive actions such as deleting a VM should require an explicit variable
 and a separate operation.
+
+The network update uses `update_unsafe: true` only to permit the NIC change,
+preserving the existing MAC address and other NIC options. No disk update
+parameters are passed. Configuration changes require a stopped VM. A VM
+already booted with incomplete Cloud-Init may need guest recovery; Proxmox
+configuration verification alone does not verify guest first-boot state.
 
 ## 7. Podman host configuration
 
@@ -181,6 +257,12 @@ after SSH becomes available. Separate playbooks deploy the applications:
 
 The Podman API socket allows Traefik to discover application containers from
 their labels.
+
+Debian 12's Podman 4.3.1 does not include Quadlet. The application roles use
+`containers.podman.podman_container` with `generate_systemd` to install
+native systemd units instead. The units recreate containers at startup and
+are enabled for boot. Application variables are loaded from
+`inventory/group_vars/podman_hosts.yml` for the `podman_hosts` group.
 
 The Podman role will:
 
