@@ -27,6 +27,7 @@ VM `9000` already provides the base for all managed VMs:
 - Debian 12 Bookworm generic cloud image
 - Proxmox storage: `local-lvm`
 - Network bridge: `vmbr0`
+- VLAN tag: `70`
 - Virtio network adapter
 - `scsi0` boot disk
 - `ide2` Cloud-Init drive
@@ -57,22 +58,28 @@ Create the Ansible project with this structure:
 │       ├── all.yml
 │       └── podman.yml
 ├── playbooks/
-│   ├── provision-vms.yml
-│   └── configure-podman.yml
+│   ├── site.yml
+│   ├── provision-podman-vm.yml
+│   ├── bootstrap-podman-host.yml
+│   ├── configure-podman.yml
+│   ├── configure-traefik.yml
+│   └── configure-helloworld.yml
 ├── roles/
-│   ├── proxmox_vm/
-│   └── podman_host/
-├── templates/
-│   └── podman-containers.yml.j2
-├── vars/
-│   └── vms.yml
-└── vault/
-    └── secrets.yml
+│   ├── podman/
+│   ├── traefik/
+│   └── helloworld/
+└── secrets/
+    ├── proxmox/
+    │   ├── api.yml
+    │   └── config.yml
+    ├── podman/
+    │   └── config.yml
+    └── containers/
+        └── traefik.yml
 ```
 
-Secrets must be stored with Ansible Vault or supplied through environment
-variables. Proxmox tokens, passwords, and private SSH keys must not be
-committed to Git.
+All files under `secrets/` are SOPS-encrypted before they are committed.
+The age private key and SSH private key remain outside Git.
 
 ## 4. Proxmox API access
 
@@ -89,8 +96,8 @@ The controller will connect to the Proxmox API using:
 - API token secret
 - TLS certificate validation setting appropriate for the local environment
 
-The API credentials will be referenced from vaulted variables rather than
-embedded in playbooks.
+The API credentials and site configuration are decrypted from SOPS files on
+the control VM rather than embedded in playbooks.
 
 ## 5. VM definition
 
@@ -108,7 +115,7 @@ Each VM definition should include:
 - network bridge and model
 - Cloud-Init user
 - SSH public key
-- static IP, gateway, and DNS settings
+- VLAN tag, static IP, gateway, and DNS settings
 - desired power state
 - groups to add to the Ansible inventory
 
@@ -121,8 +128,9 @@ podman:
   template_vmid: 9000
   cores: 4
   memory_mb: 4096
-  ip: 192.168.1.101/24
-  gateway: 192.168.1.1
+  ip: 10.10.70.4/24
+  gateway: 10.10.70.1
+  vlan_tag: 70
 ```
 
 The VM ID and network values above are examples and must be replaced with the
@@ -130,7 +138,7 @@ actual values for the environment.
 
 ## 6. VM provisioning workflow
 
-The `proxmox_vm` role and `provision-vms.yml` playbook will:
+The `provision-podman-vm.yml` playbook will:
 
 1. Validate required variables before making changes.
 2. Confirm template `9000` exists on the selected Proxmox node.
@@ -140,7 +148,7 @@ The `proxmox_vm` role and `provision-vms.yml` playbook will:
 6. Configure static networking through Proxmox Cloud-Init settings.
 7. Regenerate the Cloud-Init drive.
 8. Start the VM when its desired state is `started`.
-9. Wait for the guest agent and SSH to become available.
+9. Wait for SSH to become available.
 10. Verify the VM is reachable using Ansible.
 
 Provisioning must be idempotent: rerunning the playbook should update an
@@ -150,8 +158,16 @@ and a separate operation.
 
 ## 7. Podman host configuration
 
-The `podman_host` role and `configure-podman.yml` playbook will configure the
-new VM after SSH becomes available:
+The `podman` role and `configure-podman.yml` playbook configure the new VM
+after SSH becomes available. Separate playbooks deploy the applications:
+
+- `configure-traefik.yml` deploys the Traefik reverse proxy.
+- `configure-helloworld.yml` deploys `crccheck/hello-world`.
+
+The Podman API socket allows Traefik to discover application containers from
+their labels.
+
+The Podman role will:
 
 1. Update the Debian package cache.
 2. Install Podman and required supporting packages.
@@ -160,10 +176,8 @@ new VM after SSH becomes available:
 4. Create a dedicated application directory.
 5. Create application users, groups, directories, and permissions.
 6. Configure rootless Podman where practical.
-7. Enable required lingering or system services for the application user.
-8. Deploy container definitions from version-controlled templates.
-9. Pull images and start containers.
-10. Verify container health and listening ports.
+7. Enable the Podman API socket.
+8. Verify the base host.
 
 Podman provides a Docker-compatible command-line interface for many workflows.
 Docker Compose files should not be assumed to work unchanged; use native
@@ -184,8 +198,7 @@ The intended execution flow is:
 
 ```bash
 ansible-galaxy collection install -r requirements.yml
-ansible-playbook playbooks/provision-vms.yml
-ansible-playbook playbooks/configure-podman.yml
+ansible-playbook playbooks/site.yml
 ```
 
 The control VM's SSH private key remains local to the control VM. Ansible
@@ -196,7 +209,7 @@ host verification process.
 ## 9. Security requirements
 
 - Use a dedicated, restricted Proxmox API account and token.
-- Store API secrets with Ansible Vault.
+- Store API credentials and site configuration with SOPS and age.
 - Never commit private keys, passwords, or token secrets.
 - Use a non-root SSH user inside managed VMs.
 - Use `become: true` only for tasks that require privilege.
@@ -214,7 +227,7 @@ host verification process.
 
 - [ ] VM `9000` is stopped and marked as a Proxmox template.
 - [ ] `local-lvm` exists on the target Proxmox node.
-- [ ] `vmbr0` is the correct bridge.
+- [ ] `vmbr0` and VLAN tag `70` are correct.
 - [ ] The Proxmox API account and token work from the control VM.
 - [ ] The SSH private key exists at `~/.ssh/homelab_ed25519`.
 - [ ] The selected VM ID is unused.
@@ -233,14 +246,14 @@ host verification process.
 
 ## 11. Implementation order
 
-1. Confirm the Proxmox node name, Podman VM ID, IP address, gateway, DNS, and
-   resource sizing.
+1. Edit and encrypt `secrets/proxmox/config.yml` and
+   `secrets/podman/config.yml`.
 2. Create the Proxmox API account and restricted token.
 3. Add the Ansible project configuration and collection requirements.
-4. Implement the data-driven VM inventory and `proxmox_vm` role.
+4. Implement the data-driven VM provisioning playbook.
 5. Provision and verify the Podman VM from template `9000`.
-6. Implement the `podman_host` role.
-7. Deploy a deliberately simple test container.
+6. Implement the Podman, Traefik, and hello-world roles.
+7. Deploy and verify the HTTP test container.
 8. Add real applications one at a time with explicit ports, volumes,
    backups, and health checks.
 9. Add maintenance, update, backup, and rollback procedures.

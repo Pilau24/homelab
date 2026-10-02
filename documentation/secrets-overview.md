@@ -53,22 +53,23 @@ not required because SOPS supports SSH public keys directly as recipients.
 ├── .sops.yaml
 └── secrets/
     ├── proxmox/
-    │   ├── api.plain.yml        # temporary, ignored, local only
-    │   └── api.yml              # encrypted, safe to commit
-    ├── hosts/
-    │   └── podman.yml           # encrypted host-only values
+    │   ├── api.yml              # encrypted API credentials
+    │   └── config.yml           # encrypted site configuration
+    ├── podman/
+    │   └── config.yml           # encrypted VM configuration
     └── containers/
-        ├── traefik.plain.yml    # temporary, ignored, local only
         └── traefik.yml          # encrypted application values
 ```
 
-Plaintext templates must be removed immediately after successful encryption.
-Only encrypted files belong in Git.
+Only encrypted files belong in Git. The repository `.gitignore` protects
+plaintext, decrypted, key, and local Ansible artifacts.
 
 ## Secret separation
 
 - Proxmox API credentials are control-node-only.
-- Podman host credentials contain only values required by the Podman host.
+- Proxmox and Podman site configuration are encrypted separately.
+- The Podman configuration includes VM `101`, VLAN `70` networking, and
+  resource sizing.
 - Each application has its own encrypted file.
 - A DNS provider token is restricted to the required zone and operations.
 - Credentials are not shared between unrelated applications.
@@ -88,8 +89,8 @@ Only encrypted files belong in Git.
 
 ## Implementation state
 
-The tools, repository protections, SSH-backed SOPS configuration, and
-encrypted Proxmox and Traefik files are present. The Ansible playbooks now
-wire Proxmox credentials into VM provisioning and deploy Traefik plus
-`crccheck/hello-world` with Podman Quadlet. Rotation and recovery testing
-remain operational follow-up work.
+The tools, repository protections, SSH-backed SOPS configuration, encrypted
+Proxmox and Podman configuration, and encrypted Traefik file are present. The
+Ansible playbooks provision the Podman VM and separately deploy Podman,
+Traefik, and `crccheck/hello-world` with systemd Quadlet. Rotation and
+recovery testing remain operational follow-up work.

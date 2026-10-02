@@ -14,19 +14,14 @@ Completed and verified during the initial setup:
 
 - `age` and SOPS installed on the Debian control VM.
 - Plaintext and decrypted-file protections added to `.gitignore`.
-- `secrets/proxmox/`, `secrets/hosts/`, and `secrets/containers/` created.
+- `secrets/proxmox/`, `secrets/podman/`, and `secrets/containers/` created.
 - A dedicated SSH key path selected for SOPS identities.
 - `.sops.yaml` created with the dedicated SSH public recipient.
 - SOPS encryption and decryption tested successfully with a harmless value.
-- Proxmox and Traefik plaintext templates created for local use.
+- Proxmox, Podman, and Traefik encrypted files are present.
 
-Still required before the secrets implementation is complete:
-
-- Encrypt the real Proxmox and Traefik files and remove their plaintext
-  templates.
-- Configure persistent, protected SOPS identity loading for Ansible.
-- Wire secret values into Ansible and Podman.
-- Validate least privilege, logging, rotation, and recovery.
+Remaining operational work includes validating least privilege, logging,
+rotation, and recovery.
 
 ## Architecture
 
@@ -86,12 +81,12 @@ The repository should eventually contain files similar to:
 ├── .sops.yaml
 ├── secrets/
 │   ├── proxmox/
-│   │   └── api.yml
-│   ├── hosts/
-│   │   └── podman.yml
+│   │   ├── api.yml
+│   │   └── config.yml
+│   ├── podman/
+│   │   └── config.yml
 │   └── containers/
-│       ├── traefik.yml
-│       └── backup.yml
+│       └── traefik.yml
 ├── ansible.cfg
 ├── inventory/
 ├── playbooks/
@@ -221,7 +216,7 @@ secrets/**/*.plain.yml
 Create the directory structure:
 
 ```bash
-mkdir -p secrets/proxmox secrets/hosts secrets/containers
+mkdir -p secrets/proxmox secrets/podman secrets/containers
 ```
 
 Before staging changes, inspect the diff:
@@ -241,7 +236,7 @@ creation_rules:
   - path_regex: secrets/proxmox/.*\.ya?ml$
     age: ssh-ed25519 AAAA_REPLACE_WITH_PUBLIC_KEY
 
-  - path_regex: secrets/hosts/podman\.ya?ml$
+  - path_regex: secrets/podman/.*\.ya?ml$
     age: ssh-ed25519 AAAA_REPLACE_WITH_PUBLIC_KEY
 
   - path_regex: secrets/containers/.*\.ya?ml$
@@ -302,26 +297,38 @@ sops secrets/proxmox/api.yml
 ```
 
 Use the editor opened by SOPS to enter values. Save and exit; SOPS writes an
-encrypted YAML file. Repeat for host and application files, using only the
-fields each target needs:
+encrypted YAML file. Create the encrypted site configuration files with the fields needed by
+provisioning:
 
 ```yaml
-# secrets/hosts/podman.yml
-private_registry_username: REPLACE_LOCALLY
-private_registry_password: REPLACE_LOCALLY
+# secrets/proxmox/config.yml
+proxmox_api_host: REPLACE_LOCALLY
+proxmox_node: REPLACE_LOCALLY
+proxmox_storage: local-lvm
+proxmox_bridge: vmbr0
+proxmox_vlan_tag: 70
+proxmox_template_vmid: 9000
+proxmox_validate_certs: false
 ```
 
 ```yaml
-# secrets/containers/traefik.yml
-traefik_acme_email: REPLACE_LOCALLY
-traefik_dns_api_token: REPLACE_LOCALLY
+# secrets/podman/config.yml
+podman_vm_id: 101
+podman_vm_name: podman
+podman_vm_address: REPLACE_LOCALLY
+podman_vm_cidr: REPLACE_LOCALLY
+podman_vm_gateway: REPLACE_LOCALLY
+podman_vm_nameserver: REPLACE_LOCALLY
+podman_vm_cores: 4
+podman_vm_memory: 4096
 ```
 
 Verify structure without printing decrypted values:
 
 ```bash
 grep -q 'ENC\[' secrets/proxmox/api.yml
-grep -q 'ENC\[' secrets/hosts/podman.yml
+grep -q 'ENC\[' secrets/proxmox/config.yml
+grep -q 'ENC\[' secrets/podman/config.yml
 grep -q 'ENC\[' secrets/containers/traefik.yml
 sops --decrypt --extract '["proxmox_api_user"]' secrets/proxmox/api.yml >/dev/null
 ```
@@ -349,8 +356,10 @@ Disable persistent fact caching for decrypted values. Run the smallest
 available checks:
 
 ```bash
-ansible-playbook --syntax-check playbooks/provision-vms.yml
+ansible-playbook --syntax-check playbooks/site.yml
 ansible-playbook --syntax-check playbooks/configure-podman.yml
+ansible-playbook --syntax-check playbooks/configure-traefik.yml
+ansible-playbook --syntax-check playbooks/configure-helloworld.yml
 ```
 
 Use check mode or a targeted deployment before applying changes where the
