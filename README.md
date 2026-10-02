@@ -35,6 +35,12 @@ Edit the encrypted site configuration in:
 - [secrets/proxmox/config.yml](/srv/homelab/secrets/proxmox/config.yml)
 - [secrets/podman/config.yml](/srv/homelab/secrets/podman/config.yml)
 
+Field templates with non-production example values are available beside each
+encrypted file as `*.example.yml`. Copy the relevant template to a local
+plaintext file, replace every example value, encrypt it with SOPS, and remove
+the plaintext copy before deployment. Do not use the example values in a
+live environment.
+
 `secrets/proxmox/config.yml` contains the Proxmox host, node, storage, bridge,
 VLAN tag, and template settings. `secrets/podman/config.yml` contains the
 Podman VM ID, static IP, gateway, DNS, and resource sizing. Both files must be

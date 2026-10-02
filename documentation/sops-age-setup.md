@@ -105,6 +105,10 @@ The repository should eventually contain files similar to:
 └── roles/
 ```
 
+Example schemas are also provided as `api.example.yml`, `config.example.yml`,
+and `traefik.example.yml` beside their corresponding encrypted files. Their
+values are illustrative only and must be replaced before use.
+
 ## 2. Install and verify the tools
 
 Install age from the approved Debian source:
