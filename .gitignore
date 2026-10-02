@@ -1,0 +1,16 @@
+# Plaintext and decrypted secret material
+secrets/*.plain.yml
+secrets/**/*.plain.yml
+*.decrypted
+.env
+.env.*
+*.key
+
+# Local SOPS and key-management files
+.sops/
+.config/sops/
+
+# Common local/editor artifacts
+.DS_Store
+*.swp
+*.swo
