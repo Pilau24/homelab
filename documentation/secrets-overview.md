@@ -1,8 +1,7 @@
 # Homelab secrets overview
 
 This document summarizes the secrets design. Follow
-[SECRETS-IMPLEMENTATION.md](./SECRETS-IMPLEMENTATION.md) for the complete
-step-by-step setup.
+[sops-age-setup.md](./sops-age-setup.md) for the complete setup procedure.
 
 ## Purpose
 
@@ -90,6 +89,7 @@ Only encrypted files belong in Git.
 ## Implementation state
 
 The tools, repository protections, SSH-backed SOPS configuration, and
-harmless encryption/decryption test have been completed. Real secret-file
-encryption, Ansible delivery, Podman integration, rotation testing, and
-recovery testing remain implementation work.
+encrypted Proxmox and Traefik files are present. The Ansible playbooks now
+wire Proxmox credentials into VM provisioning and deploy Traefik plus
+`crccheck/hello-world` with Podman Quadlet. Rotation and recovery testing
+remain operational follow-up work.
